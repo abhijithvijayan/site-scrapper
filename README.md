@@ -21,3 +21,7 @@ yarn deploy
 ```shell
 yarn deploy
 ```
+
+### Create Slack Bot For Workspace
+
+> <https://slack.com/intl/en-in/help/articles/115005265703-Create-a-bot-for-your-workspace>

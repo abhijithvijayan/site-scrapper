@@ -3,6 +3,7 @@ require('dotenv').config({path: `${__dirname}/.env`});
 const {isNull, isNullOrUndefined, isNumber: isPureNumber, isString, isEmpty} = require("@abhijithvijayan/ts-utils");
 const chromium = require("@sparticuz/chromium");
 const puppeteer = require("puppeteer-core");
+const fetch = require('node-fetch');
 const hash = require('object-hash');
 const express = require('express');
 const { Deta } = require('deta');
@@ -49,7 +50,7 @@ const initPuppeteer = async () => {
         });
         console.debug({msg: "browser initialized"});
     } catch (err) {
-        console.error({err});
+        throw err instanceof Error ? err : new Error(err);
     }
 
    return browser;
@@ -73,13 +74,27 @@ function getCacheKey(obj) {
     return hash(payload);
 }
 
+// Note: error handler middleware MUST have 4 parameters: error, req, res, next. Otherwise, handler won't fire.
 const errorHandler = (err, req, res, next) => {
     console.error({err});
+
+    // capture error in slack
+    fetch(process.env.SLACK_WEBHOOK_URL, {
+        method: 'post',
+        body: JSON.stringify({
+            text: `
+            Error: Something went wrong!\nMessage: ${err.message}
+            `
+        }),
+        headers: {'Content-Type': 'application/json'},
+    }).catch(() => {
+        //
+    })
 
     res.sendStatus(500);
 }
 
-const sendResponse = (req, res) => {
+const sendResponse = (req, res, next) => {
     if (!isNullOrUndefined(req._cached)) {
         return res.status(200).json({
             status: "OK",
@@ -87,27 +102,35 @@ const sendResponse = (req, res) => {
         })
     }
 
-    throw new Error("Server Error");
+    next(new Error("Server Error"));
 }
 
 const cacheEntry = async (req, res, next) => {
-    if (!isNullOrUndefined(req._entry)) {
-        console.debug({msg: "caching response"});
-        // update cache
-        req._cached = await db.put(req._entry);
-        console.debug({msg: "caching successful"});
-    }
+    try {
+        if (!isNullOrUndefined(req._entry)) {
+            console.debug({msg: "caching response"});
+            // update cache
+            req._cached = await db.put(req._entry);
+            console.debug({msg: "caching successful"});
+        }
 
-    next();
+        next();
+    } catch (err) {
+        next(err);
+    }
 }
 
 const getBrowser = async (req, res, next) => {
-    if (isNullOrUndefined(req._cached)) {
-        // if cache exist, no need to initialize browser
-        req._browser = await initPuppeteer();
-    }
+    try {
+        if (isNullOrUndefined(req._cached)) {
+            // if cache exist, no need to initialize browser
+            req._browser = await initPuppeteer();
+        }
 
-    next();
+        next();
+    } catch (err) {
+        next(err);
+    }
 }
 
 const computeHash = (req, res, next) => {
@@ -124,33 +147,37 @@ function isNumber(value) {
 }
 
 const getFromCache = async (req, res, next) => {
-    // get entry from DB
-    const entry = await db.get(req._hash);
-    // compute the cache TTL from query
-    const offsetMilliSeconds = isNumber(req.query.cacheTTL) ? Number(req.query.cacheTTL) : cacheTTL;
+    try {
+        // get entry from DB
+        const entry = await db.get(req._hash);
+        // compute the cache TTL from query
+        const offsetMilliSeconds = isNumber(req.query.cacheTTL) ? Number(req.query.cacheTTL) : cacheTTL;
 
-    if (!isNull(entry)) {
-        // if cache entry falls into the cache TTL window, return that item
-        const currentTimeInSeconds = getTimeInSeconds(new Date());
-        const cacheTimestampInSeconds = getTimeInSeconds(new Date(entry.timestamp));
-        const offsetInSeconds = offsetMilliSeconds / 1000;
+        if (!isNull(entry)) {
+            // if cache entry falls into the cache TTL window, return that item
+            const currentTimeInSeconds = getTimeInSeconds(new Date());
+            const cacheTimestampInSeconds = getTimeInSeconds(new Date(entry.timestamp));
+            const offsetInSeconds = offsetMilliSeconds / 1000;
 
-        if (
-            // the current time should be greater than the cached timestamp
-            currentTimeInSeconds >= cacheTimestampInSeconds &&
-            // but within the cache window
-            currentTimeInSeconds < cacheTimestampInSeconds + offsetInSeconds
-        ) {
-            console.debug({msg: "cache exist", ttl: offsetMilliSeconds});
-            req._cached = entry;
+            if (
+                // the current time should be greater than the cached timestamp
+                currentTimeInSeconds >= cacheTimestampInSeconds &&
+                // but within the cache window
+                currentTimeInSeconds < cacheTimestampInSeconds + offsetInSeconds
+            ) {
+                console.debug({msg: "cache exist", ttl: offsetMilliSeconds});
+                req._cached = entry;
+            } else {
+                console.debug({msg: "cache expired", ttl: offsetMilliSeconds});
+            }
         } else {
-            console.debug({msg: "cache expired", ttl: offsetMilliSeconds});
+            console.debug({msg: "not in cache"});
         }
-    } else {
-        console.debug({msg: "not in cache"});
-    }
 
-    next();
+        next();
+    } catch (err) {
+        next(err)
+    }
 }
 
 server.use((req, res, next) => {
@@ -173,34 +200,38 @@ server.get('/api/v1/html', [
     getFromCache,
     getBrowser,
     async (req, res, next) => {
-        const url = req.query.url;
+        try {
+            const url = req.query.url;
 
-        if (isNullOrUndefined(req._cached) && !isNull(req._browser) && !isNull(url)) {
-            let page = await req._browser.newPage();
-            console.debug({msg: "loading page"});
+            if (isNullOrUndefined(req._cached) && !isNull(req._browser) && !isNull(url)) {
+                let page = await req._browser.newPage();
+                console.debug({msg: "loading page"});
 
-            // wait till the network calls are completed
-            // since this function has a timeout of 10seconds, give a max of 9seconds before timing out
-            await page.goto(url, { waitUntil: 'networkidle0', timeout: 9000 });
-            console.debug({msg: "page loaded"});
+                // wait till the network calls are completed
+                // since this function has a timeout of 10seconds, give a max of 9seconds before timing out
+                await page.goto(url, { waitUntil: 'networkidle0', timeout: 9000 });
+                console.debug({msg: "page loaded"});
 
-            // get page html
-            let bodyHTML = await page.evaluate(() =>  document.documentElement.outerHTML);
-            console.debug({msg: "getting html"});
+                // get page html
+                let bodyHTML = await page.evaluate(() =>  document.documentElement.outerHTML);
+                console.debug({msg: "getting html"});
 
-            // no need to wait for browser to close
-            req._browser.close();
+                // no need to wait for browser to close
+                req._browser.close();
 
-            // payload to store in DB
-            req._entry = {
-                key: req._hash,
-                url,
-                html: bodyHTML,
-                timestamp: adjustForTimezone(new Date(), timezoneOffset) // in UTC
-            };
+                // payload to store in DB
+                req._entry = {
+                    key: req._hash,
+                    url,
+                    html: bodyHTML,
+                    timestamp: adjustForTimezone(new Date(), timezoneOffset) // in UTC
+                };
+            }
+
+            next();
+        } catch (err) {
+            next(err)
         }
-
-        next();
     },
     cacheEntry,
     sendResponse
