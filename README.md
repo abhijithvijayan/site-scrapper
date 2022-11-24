@@ -32,3 +32,6 @@ curl --request GET \
   --url 'https://api.domain/api/v1/html?url=https://example.com&cacheTTL=1000' \
   --header 'content-type: application/json'
 ```
+
+- `cacheTTL` Optional. when given a number in milli-seconds, returns from cache if found in that time window. Defaults to `300000` (5 minutes)
+- `url` Website URL to Fetch HTML from
