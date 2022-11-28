@@ -25,3 +25,13 @@ yarn deploy
 ### Create Slack Bot For Workspace
 
 > <https://slack.com/intl/en-in/help/articles/115005265703-Create-a-bot-for-your-workspace>
+
+### Sample Curl
+```
+curl --request GET \
+  --url 'https://api.domain/api/v1/html?url=https://example.com&cacheTTL=1000' \
+  --header 'content-type: application/json'
+```
+
+- `cacheTTL` Optional. when given a number in milli-seconds, returns from cache if found in that time window. Defaults to `300000` (5 minutes)
+- `url` Website URL to Fetch HTML from
