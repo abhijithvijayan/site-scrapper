@@ -228,7 +228,7 @@ server.get('/api/v1/html', [
         try {
             const url = req.query.url;
 
-            if (isNullOrUndefined(req._cached) && !isNull(req._browser) && !isNull(url)) {
+            if (isNullOrUndefined(req._cached) && !isNull(req._browser) && !isNullOrUndefined(url)) {
                 let page = await req._browser.newPage();
                 console.debug({msg: "loading page"});
 
