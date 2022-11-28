@@ -160,7 +160,7 @@ const getBrowser = async (req, res, next) => {
 const computeHash = (req, res, next) => {
     // get hash from query params
     req._hash = getCacheKey(req.query);
-    console.debug({msg: "hash", hash: req._hash});
+    console.debug({msg: "hash", hash: req._hash, query: req.query});
 
     next();
 }
