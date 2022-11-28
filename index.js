@@ -78,13 +78,37 @@ function getCacheKey(obj) {
 const errorHandler = (err, req, res, next) => {
     console.error({err});
 
+    let payload = {};
+    if (req.method === 'POST') {
+        payload = req.body;
+    } else {
+        payload = req.query;
+    }
+
     // capture error in slack
     fetch(process.env.SLACK_WEBHOOK_URL, {
         method: 'post',
         body: JSON.stringify({
-            text: `
-            Error: Something went wrong!\nMessage: ${err.message}
-            `
+            "attachments": [
+                {
+                    "fallback": "Exception: Something went wrong!",
+                    "author_name": `${req.method} ${req.originalUrl.split("?")[0]} - 500`,
+                    "title": "Exception: Something went wrong!",
+                    "title_link": "https://deta.sh",
+                    "fields": [
+                        {
+                            "title": "Received",
+                            "value": JSON.stringify(payload),
+                            "short": false
+                        }
+                    ],
+                    "text": `*Message*: ${err.message}`,
+                    "footer": `_via <https://deta.sh|deta.sh>_`,
+                    "footer_icon": "https://avatars.slack-edge.com/2022-10-27/4269372913767_b64924b6bd2772bc2b77_72.png",
+                    "ts": adjustForTimezone(new Date(), timezoneOffset).getTime(),
+                    "color": "#E03E2F"
+                }
+            ]
         }),
         headers: {'Content-Type': 'application/json'},
     }).catch(() => {
