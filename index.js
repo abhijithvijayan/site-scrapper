@@ -14,7 +14,8 @@ const deta = Deta(process.env.DETA_PROJECT_KEY);
 const db = deta.Base(process.env.DETA_DB_NAME);
 
 const timezoneOffset = 0; // for UTC
-const cacheTTL = 5 * 60 * 1000; // 5 minutes
+const cacheTTL = 24 * 60 * 60 * 1000; // 24 hours
+// const cacheTTL = 5 * 60 * 1000; // 5 minutes
 
 function adjustForTimezone(date, offset = 0) {
     const timeOffsetInMS = offset * 60 * 60 * 1000;
