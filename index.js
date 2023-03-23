@@ -29,12 +29,46 @@ function getTimeInSeconds(date = new Date()) {
     return today.getTime() / 1000;
 }
 
-// 'a,b,c' => ['a', 'b', 'c']
-function extractFromString(str) {
+/**
+ *
+ * @param str ".{0,1}status-domain-in.pages.dev,.{0,1}status-example-in.pages.dev,https://status.domain.in,https://status.example.in"
+ * @returns [/.{0,1}status-domain-in.pages.dev$/, /.{0,1}status-example-in.pages.dev$/, /https:\/\/status.domain.in$/, /https:\/\/status.example.in$/]
+ */
+function extractOriginsRegexFromString(str) {
+    // https://regex101.com/r/AypyXd/1
+    // comma that is not suffixed by a number
+    // couldn't match the comma without matching the previous text
+    // so might as well match two letters before comma(2 is the minimum length for a domain TLD)
+    const re = /[^0-9]{2},/g;
+    const placeholder = "::__::";
+
+    // function that does extra escaping of the slash
+    // use this https://stackoverflow.com/a/6969486 if in need of more espacing in the future
+    function escapeReplacement(string) {
+        return string.replace(/\//g, "\\/");
+    }
+
     return str
-        .split(',')
-        .map((e) => e.trim())
-        .filter((e) => e.length > 0);
+        .match(re)
+        // for each match replace the comma
+        .reduce((prev, item) => {
+            // preserve the part of the TLD, and replace the comma with some weird placeholder
+            // that won't cause problems during splitting
+            prev = prev.replace(item, item.slice(0, -1) + placeholder);
+
+            return prev;
+        }, str) // use the original string as the starting input
+        .split(placeholder)
+        // form regexes
+        .reduce((p, c) => {
+            if (c.trim().length > 0) {
+                // convert to a regex with $ at the end to avoid matching invalid TLDs
+                // this is for added security to prevent spoofing
+                p.push(new RegExp(escapeReplacement(`${c.trim()}$`)));
+            }
+
+            return p;
+        }, []);
 }
 
 const initPuppeteer = async () => {
@@ -62,7 +96,7 @@ server.use(express.json());
 server.set('trust proxy', true);
 server.use(
     cors({
-        origin: extractFromString(process.env.CORS_ORIGINS),
+        origin: extractOriginsRegexFromString(process.env.CORS_ORIGINS),
     })
 );
 
